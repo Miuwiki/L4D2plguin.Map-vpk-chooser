@@ -207,8 +207,6 @@ public void OnAdminMenuCreated(Handle pass)
         return;
     }
 
-    LogMessage("create admin menu category.");
-
     g_TopmenuCategroy_mapchoose = adminmenu.AddCategory("l4d2_miuwiki_choosemap", TopMenuHandler_Category, "sm_miuwikichoosemap", ADMFLAG_CHEATS);
     g_TopmenuItem_official      = adminmenu.AddItem("l4d2_miuwiki_choosemap_official", TopMenuHandler_Item, g_TopmenuCategroy_mapchoose, "sm_miuwikichoosemap_official", ADMFLAG_CHEATS);
     g_TopmenuItem_workshop      = adminmenu.AddItem("l4d2_miuwiki_choosemap_workshop", TopMenuHandler_Item, g_TopmenuCategroy_mapchoose, "sm_miuwikichoosemap_workshop", ADMFLAG_CHEATS);

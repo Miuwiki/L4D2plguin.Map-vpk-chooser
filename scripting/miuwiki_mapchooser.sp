@@ -436,10 +436,10 @@ void LoadServerMap()
             kv.GetString("Map", chapter_name, sizeof(chapter_name));
             Format(path, sizeof(path), "%s%s%s", path, chapter_name, MAP_SEPARATOR);
 
-            if( official )
-                LogMessage("Get official map: %s, chapter: %s", mission_name, chapter_name);
-            else
-                LogMessage("Get workshop map: %s, chapter: %s", mission_name, chapter_name);
+            // if( official )
+            //     LogMessage("Get official map: %s, chapter: %s", mission_name, chapter_name);
+            // else
+            //     LogMessage("Get workshop map: %s, chapter: %s", mission_name, chapter_name);
         }
         while( kv.GotoNextKey() );
 
@@ -455,6 +455,8 @@ void LoadServerMap()
     servermap.SortOfficialMap();
     servermap.GetMissionVpkName();
     delete missionlist;
+
+    LogMessage("Finish Map Load. Get %d official map, %d workshop map", servermap.official_map.Length, servermap.workshop_map.Length);
 }
 
 void LoadGameData()
@@ -476,19 +478,19 @@ void LoadGameData()
 
 stock int LoadStringFromAddress(Address addr, char[] buffer, int maxlen, bool &bIsNullPointer = false)
 {
-	if( !addr )
+    if( !addr )
     {
-		bIsNullPointer = true;
-		return 0;
-	}
-	
-	int c;
-	char ch;
-	do
+        bIsNullPointer = true;
+        return 0;
+    }
+
+    int c;
+    char ch;
+    do
     {
-		ch = view_as<int>(LoadFromAddress(addr + view_as<Address>(c), NumberType_Int8));
-		buffer[c] = ch;
-	}
+        ch = view_as<int>(LoadFromAddress(addr + view_as<Address>(c), NumberType_Int8));
+        buffer[c] = ch;
+    }
     while (ch && ++c < maxlen - 1);
-	return c;
+    return c;
 }

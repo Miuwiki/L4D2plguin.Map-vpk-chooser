@@ -124,20 +124,24 @@ enum struct ServerMapInfo
             return false;
 
         Address data = LoadFromAddress(g_Address_vecAddonMetadata, NumberType_Int32);
-        int offset;
+        int offset, type;
         char mission_txt[128], path[128];
         for(int i = 0; i < addonlist; i++)
         {
-            LoadStringFromAddress(data + view_as<Address>(offset) + view_as<Address>(128), mission_txt, sizeof(mission_txt));
-            LoadStringFromAddress(data + view_as<Address>(offset), path, sizeof(path));
+            type = LoadFromAddress(data + view_as<Address>(offset) + view_as<Address>(256), NumberType_Int8);
+
+            if( type < 0 || type > 2 )  // addonlist by read addonlist.txt count is not correct since there is mutli pack vpk map.  
+                break;                  // to reduce the situtation of over read, check type before it is over.
 
             // type != 1, which is not mission
-            if( LoadFromAddress(data + view_as<Address>(offset) + view_as<Address>(256), NumberType_Int8) != 1 )
+            if( type != 1 )
             {
-                // PrintToChatAll("this vpk path %s is not a mission.", path);
                 offset += 264; // 128 + 128 + 8
                 continue;
             }
+            
+            LoadStringFromAddress(data + view_as<Address>(offset) + view_as<Address>(128), mission_txt, sizeof(mission_txt));
+            LoadStringFromAddress(data + view_as<Address>(offset), path, sizeof(path));
 
             this.GetVpknameFromPath(path, sizeof(path));
             this.vpk_name.SetString(mission_txt, path);

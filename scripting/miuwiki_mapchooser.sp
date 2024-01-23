@@ -19,7 +19,6 @@ public Plugin myinfo =
 
 #define OFFICIAL_MAP  0
 #define WORKSHOP_MAP  1
-#define MAP_SEPARATOR "^^"
 #define GAMEDATA      "miuwiki_mapchooser"
 
 static char g_official_vpkname[][128] = 
@@ -55,123 +54,18 @@ TopMenuObject
     g_TopmenuItem_official,
     g_TopmenuItem_workshop;
 
-enum struct ServerMapInfo
+enum struct MapInfo
 {
-    ArrayList official_map; // data type: mission file^^mission.Name^^chapter1^^chapter2...
-    ArrayList workshop_map;
-    StringMap all_map;  // mission.Name => mission.Name^^mission file^^mission.Name^^chapter1^^chapter2...
-    StringMap vpk_name; // mission file name => vpk name
+    int  type;
+    char missionfile[128];
+    char missionname[128];
+    char vpkname[128];
 
-    void SplitChapter(const char[] source = "", ArrayList arraystr) // use param not the return because it doesn't need to delete it in the loop, just Clear() instead.
-    {
-        char buffer[512], temp[512]; int split;
-        FormatEx(buffer, sizeof(buffer), "%s", source);
-
-        do
-        {
-            if( IsNullString(buffer) )
-                break;
-
-            split = SplitString(buffer, MAP_SEPARATOR, temp, sizeof(temp));
-
-            if( split == -1 )
-                break;
-
-            arraystr.PushString(temp);
-            Format(buffer, sizeof(buffer), "%s", buffer[split]);
-        }
-        while( split != -1 );
-    }
-
-    void SortOfficialMap()
-    {
-        ArrayList official_map_clone = this.official_map.Clone();
-        ArrayList chapterlist        = new ArrayList(ByteCountToCells(128));
-
-        char buffer[1024], mission_name[128];
-        for(int i = 0; i < this.official_map.Length; i++)
-        {
-            this.official_map.GetString(i, buffer, sizeof(buffer));
-            this.SplitChapter(buffer, chapterlist);
-            chapterlist.GetString(1, mission_name, sizeof(mission_name));
-
-            int index = StringToInt(mission_name[5]) - 1; // remove "L4D2C" so "L4D2C5" will be 5 instead.
-                                                          // since map always start from 1 but arraylist start from 0, reduce 1 to adjust arraylist.
-                                                          // the true name hasn't been effected by reduce 1.
-            official_map_clone.SetString(index, buffer);
-            chapterlist.Clear();
-        }
-
-        delete chapterlist;
-        delete this.official_map;
-
-        this.official_map = official_map_clone; // use clone handle as the new global official_map;
-    }
-
-    bool GetMissionVpkName()
-    {
-        // load official map vpkname.
-        char official_mission_txt[128];
-        for(int i = 0; i < sizeof(g_official_vpkname); i++)
-        {
-            FormatEx(official_mission_txt, sizeof(official_mission_txt), "campaign%d", i+1);
-            this.vpk_name.SetString(official_mission_txt, g_official_vpkname[i]);
-        }
-
-        // load workshop map vpkname.
-        int addonlist = GetAddonList();
-        if( addonlist == 0 )
-            return false;
-
-        Address data = LoadFromAddress(g_Address_vecAddonMetadata, NumberType_Int32);
-        int offset, type;
-        char mission_txt[128], path[128];
-        for(int i = 0; i < addonlist; i++)
-        {
-            type = LoadFromAddress(data + view_as<Address>(offset) + view_as<Address>(256), NumberType_Int8);
-
-            if( type < 0 || type > 2 )  // addonlist by read addonlist.txt count is not correct since there is mutli pack vpk map.  
-                break;                  // to reduce the situtation of over read, check type before it is over.
-
-            // type != 1, which is not mission
-            if( type != 1 )
-            {
-                offset += 264; // 128 + 128 + 8
-                continue;
-            }
-            
-            LoadStringFromAddress(data + view_as<Address>(offset) + view_as<Address>(128), mission_txt, sizeof(mission_txt));
-            LoadStringFromAddress(data + view_as<Address>(offset), path, sizeof(path));
-
-            this.GetVpknameFromPath(path, sizeof(path));
-            this.vpk_name.SetString(mission_txt, path);
-
-            // PrintToChatAll("store mission vpk path %s to %s", path, mission_txt);
-            offset += 264;
-        }
-
-        return true;
-    }
-
-    void GetVpknameFromPath(char[] buffer, int size) // can use to get the byte start the str end.
-    {
-        int len = strlen(buffer);
-        int index;
-        for(int i = 0; i < len; i++)
-        {
-            // PrintToChatAll("comparing %s", buffer[len - i]);
-            if( strncmp(buffer[len - i], "/", 1) == 0 )
-                break;
-            
-            index++;
-        }
-
-        Format(buffer, size, "%s", buffer[len - index + 1]);
-        SplitString(buffer, ".vpk", buffer, size);
-    }
+    ArrayList chapter;
 }
 
-ServerMapInfo servermap;
+ArrayList servermap;
+StringMap workshopmap_vpkname;
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
@@ -183,12 +77,9 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 
 public void OnPluginStart()
 {
+    servermap           = new ArrayList(sizeof(MapInfo));
+    workshopmap_vpkname = new StringMap();
     LoadGameData();
-
-    servermap.official_map = new ArrayList(ByteCountToCells(1024));
-    servermap.workshop_map = new ArrayList(ByteCountToCells(1024));
-    servermap.all_map      = new StringMap();
-    servermap.vpk_name     = new StringMap();
     LoadServerMap();
     
     // RegConsoleCmd("sm_showmap", Cmd_ShowMap);
@@ -269,36 +160,27 @@ void TopMenuHandler_Item(TopMenu topmenu, TopMenuAction action, TopMenuObject ob
 
 void ShowMapList(int client, int mode)
 {
-    Menu menu             = new Menu(MenuHandler_ShowMapList);
-    ArrayList chapterlist = new ArrayList(ByteCountToCells(1024));
+    Menu menu = new Menu(MenuHandler_ShowMapList);
 
-    ArrayList source = mode == OFFICIAL_MAP ? servermap.official_map : servermap.workshop_map;
-
-    char buffer[512], mapname[128], filename[128], vpkname[128];
-    
     if( mode == OFFICIAL_MAP )
         menu.SetTitle("★官方图\n——————————————");
     else
         menu.SetTitle("★三方图\n——————————————");
 
-    for(int i = 0; i < source.Length; i++)
+    MapInfo map;
+    for(int i = 0; i < servermap.Length; i++)
     {
-        source.GetString(i, buffer, sizeof(buffer));
-        servermap.SplitChapter(buffer, chapterlist);
-        chapterlist.GetString(0, filename, sizeof(filename)); // this one is mission file name
-        chapterlist.GetString(1, mapname, sizeof(mapname)); // this one is mission name
-
-        if( servermap.vpk_name.GetString(filename, vpkname, sizeof(vpkname) ) ) // get vpkname from servermap.vpk_name
-            FormatEx(buffer, sizeof(buffer), "%s", vpkname);
+        servermap.GetArray(i, map);
+        if( map.type != mode )
+            continue;
+        
+        if( IsNullString(map.vpkname) )
+            menu.AddItem(map.missionname, map.missionname);
         else
-            FormatEx(buffer, sizeof(buffer), "%s", mapname);
-
-        menu.AddItem(mapname, buffer);
-        chapterlist.Clear();
+            menu.AddItem(map.missionname, map.vpkname);
     }
 
     menu.Display(client, 20);
-    delete chapterlist;
 }
 
 int MenuHandler_ShowMapList(Menu menu, MenuAction action, int client, int index)
@@ -321,29 +203,27 @@ int MenuHandler_ShowMapList(Menu menu, MenuAction action, int client, int index)
 
 void ShowChapterList(int client, const char[] info)
 {
-    Menu menu             = new Menu(MenuHandler_ChangeMap);
-    ArrayList chapterlist = new ArrayList(ByteCountToCells(1024));
+    char temp[128];
 
-    char buffer[1024], vpkname[128];
-    servermap.all_map.GetString(info, buffer, sizeof(buffer));
-    servermap.SplitChapter(buffer, chapterlist);
-    chapterlist.GetString(0, buffer, sizeof(buffer));
+    Menu menu = new Menu(MenuHandler_ChangeMap);
+    FormatEx(temp, sizeof(temp), "★%s\n——————————————", info);
+    menu.SetTitle(temp);
 
-    if( servermap.vpk_name.GetString(buffer, vpkname, sizeof(vpkname) ) ) // get vpkname from servermap.vpk_name
-        FormatEx(buffer, sizeof(buffer), "%s", vpkname);
-        
-    Format(buffer, sizeof(buffer), "★%s\n——————————————", buffer);
-    menu.SetTitle(buffer);
-
-    for(int i = 2; i < chapterlist.Length; i++) // 0,1 is the mission file name and mission name;
+    MapInfo map;
+    for(int i = 0; i < servermap.Length; i++) // 0,1 is the mission file name and mission name;
     {
-        chapterlist.GetString(i, buffer, sizeof(buffer));
-    
-        menu.AddItem(buffer, buffer);
+        servermap.GetArray(i, map);
+        if( strcmp(map.missionname, info) == 0 )
+            break;
+    }
+
+    for(int i = 0; i < map.chapter.Length; i++)
+    {
+        map.chapter.GetString(i, temp, sizeof(temp));
+        menu.AddItem(temp, temp);
     }
 
     menu.Display(client, 20);
-    delete chapterlist;
 }
 
 int MenuHandler_ChangeMap(Menu menu, MenuAction action, int client, int index)
@@ -362,6 +242,69 @@ int MenuHandler_ChangeMap(Menu menu, MenuAction action, int client, int index)
 
     return 0;
 }
+
+
+void LoadServerMap()
+{
+    char path[128];
+
+    DirectoryListing missionlist = OpenDirectory("missions", true);
+    if( missionlist == null )
+    {
+        SetFailState("Failed to open missions folder, game error!");
+    }
+
+    while( missionlist.GetNext( path, sizeof(path)) )
+    {
+        if( strcmp(path[strlen(path) - 4], ".txt") != 0 ) // just confirm the last 4 byte is ".txt" or not.
+            continue;
+
+        MapInfo map;
+        FormatEx(map.missionfile, sizeof(map.missionfile), "%s", path);
+
+        Format(path, sizeof(path), "missions/%s", path);
+        KeyValues kv = new KeyValues("");
+        kv.ImportFromFile(path);
+        kv.GetString("Name", map.missionname, sizeof(map.missionname));
+
+        SplitString(map.missionfile, ".txt", map.missionfile, sizeof(map.missionfile)); // remove .txt in the end.
+
+        map.type = strncmp(map.missionname, "L4D2C", 5) == 0 ? OFFICIAL_MAP : WORKSHOP_MAP; // whatever, if the Name of the mission can be l4d2c with workshop map, i don't know how to identify it.
+
+        kv.JumpToKey("modes");
+        if( !kv.JumpToKey("coop") || strcmp(map.missionname, "credits" ) == 0 ) // we only collect the map which have coop mode but not credits.
+        {
+            delete kv;
+            continue;
+        }
+            
+        map.chapter = new ArrayList(ByteCountToCells(128));
+        kv.GotoFirstSubKey();
+        do
+        {
+            kv.GetString("Map", path, sizeof(path));
+            map.chapter.PushString(path);
+
+            // if( map.type )
+            //     LogMessage("Get official map: %s, file: %s, chapter: %s", map.missionname, map.missionfile, path);
+            // else
+            //     LogMessage("Get workshop map: %s, file: %s, chapter: %s", map.missionname, map.missionfile, path);
+        }
+        while( kv.GotoNextKey() );
+
+        servermap.PushArray(map);
+        delete kv;
+    }
+
+    SortOfficialMap();
+    GetWorkshopMapVpkName();
+    SetMissionVpkName();
+
+    delete missionlist;
+
+    // LogMessage("Finish Map Load. Get %d official map, %d workshop map", servermap.official_map.Length, servermap.workshop_map.Length);
+}
+
 
 int GetAddonList()
 {
@@ -390,75 +333,98 @@ int GetAddonList()
 
     return addonlist;
 }
-
-void LoadServerMap()
+void SortOfficialMap()
 {
-    bool official;
-    char path[1024];
-    char mission_filename[128];
-    char mission_name[128];
-    char chapter_name[128];
-
-    DirectoryListing missionlist = OpenDirectory("missions", true);
-    if( missionlist == null )
+    int index;
+    MapInfo map;
+    for(int i = 0; i < servermap.Length; i++)
     {
-        SetFailState("Failed to open missions folder, game error!");
-    }
-
-    while( missionlist.GetNext( mission_filename, sizeof(mission_filename)) )
-    {
-        if( strcmp(mission_filename[strlen(mission_filename) - 4], ".txt") != 0 ) // just confirm the last 4 byte is ".txt" or not.
+        servermap.GetArray(i, map);
+        if( map.type != OFFICIAL_MAP )
             continue;
-
-        FormatEx(path, sizeof(path), "missions/%s", mission_filename);
-        KeyValues kv = new KeyValues("");
-        kv.ImportFromFile(path);
-        kv.GetString("Name", mission_name, sizeof(mission_name));
-
-        SplitString(mission_filename, ".txt", mission_filename, sizeof(mission_filename)); // remove .txt in the end.
-
-        // now we use path as a buffer to store map info.
-        // this will become mission_filename^^mission_name^^
-        // after do that it store each chapter name in order to sort the chapter.
-        FormatEx(path, sizeof(path), "%s%s%s%s", mission_filename, MAP_SEPARATOR, 
-                                                 mission_name, MAP_SEPARATOR);    
-
-        official = strncmp(mission_name, "L4D2C", 5) == 0 ? true : false; // whatever, if the Name of the mission can be l4d2c with workshop map, i don't know how to identify it.
-
-        kv.JumpToKey("modes");
-        if( !kv.JumpToKey("coop") || strcmp(mission_name, "credits" ) == 0 ) // we only collect the map which have coop mode but not credits.
+        
+        index = StringToInt(map.missionname[5]) - 1;
+        if( index != i )
         {
-            delete kv;
-            continue;
+            // swap current index to the campaign index and keep check current index.
+            servermap.SwapAt(i, index);
+            i--;
         }
             
-        kv.GotoFirstSubKey();
-        do
+    }
+}
+void GetWorkshopMapVpkName()
+{
+    // load workshop map vpkname.
+    int addonlist = GetAddonList();
+    if( addonlist == 0 )
+        return;
+
+    Address data = LoadFromAddress(g_Address_vecAddonMetadata, NumberType_Int32);
+    int offset, type;
+    char missionfile[128], path[128];
+    for(int i = 0; i < addonlist; i++)
+    {
+        type = LoadFromAddress(data + view_as<Address>(offset) + view_as<Address>(256), NumberType_Int8);
+
+        if( type < 0 || type > 2 )  // addonlist by read addonlist.txt count is not correct since there is mutli pack vpk map.  
+            break;                  // to reduce the situtation of over read, check type before it is over.
+
+        // type != 1, which is not mission
+        if( type != 1 )
         {
-            kv.GetString("Map", chapter_name, sizeof(chapter_name));
-            Format(path, sizeof(path), "%s%s%s", path, chapter_name, MAP_SEPARATOR);
-
-            // if( official )
-            //     LogMessage("Get official map: %s, chapter: %s", mission_name, chapter_name);
-            // else
-            //     LogMessage("Get workshop map: %s, chapter: %s", mission_name, chapter_name);
+            offset += 264; // 128 + 128 + 8
+            continue;
         }
-        while( kv.GotoNextKey() );
-
-        if( official )
-            servermap.official_map.PushString(path);
-        else
-            servermap.workshop_map.PushString(path);
         
-        servermap.all_map.SetString(mission_name, path);
-        delete kv;
+        LoadStringFromAddress(data + view_as<Address>(offset) + view_as<Address>(128), missionfile, sizeof(missionfile));
+        LoadStringFromAddress(data + view_as<Address>(offset), path, sizeof(path));
+
+        GetVpknameFromPath(path, sizeof(path));
+        workshopmap_vpkname.SetString(missionfile, path);
+
+        LogMessage("store mission vpk path %s to %s", path, missionfile);
+        offset += 264;
+    }
+}
+void GetVpknameFromPath(char[] buffer, int size) // can use to get the byte start the str end.
+{
+    int len = strlen(buffer);
+    int index;
+    for(int i = 0; i < len; i++)
+    {
+        // PrintToChatAll("comparing %s", buffer[len - i]);
+        if( strncmp(buffer[len - i], "/", 1) == 0 )
+            break;
+        
+        index++;
     }
 
-    servermap.SortOfficialMap();
-    servermap.GetMissionVpkName();
-    delete missionlist;
+    Format(buffer, size, "%s", buffer[len - index + 1]);
+    SplitString(buffer, ".vpk", buffer, size);
+}
+void SetMissionVpkName()
+{
+    MapInfo map;
+    for(int i = 0; i < servermap.Length; i++)
+    {
+        servermap.GetArray(i, map);
 
-    LogMessage("Finish Map Load. Get %d official map, %d workshop map", servermap.official_map.Length, servermap.workshop_map.Length);
+        if( map.type == OFFICIAL_MAP )
+        {
+            int index = StringToInt(map.missionname[5]); // remove L4D2C and add campaign
+            FormatEx(map.vpkname, sizeof(map.vpkname), "%s", g_official_vpkname[index - 1]); // mission name start from 1, so reduce 1 to adjust the char array.
+        }
+
+        else if( map.type == WORKSHOP_MAP )
+        {
+            if( workshopmap_vpkname.ContainsKey(map.missionfile) )
+                workshopmap_vpkname.GetString(map.missionfile, map.vpkname, sizeof(map.vpkname));
+        }
+
+        LogMessage("total servermap %d set vpkname of map %s, vpkname %s",servermap.Length, map.missionname, map.vpkname);
+        servermap.SetArray(i, map);
+    }
 }
 
 void LoadGameData()
@@ -473,7 +439,13 @@ void LoadGameData()
     if(hGameData == null) 
         SetFailState("Failed to load \"%s.txt\" gamedata.", GAMEDATA);
 
-    g_Address_vecAddonMetadata = hGameData.GetMemSig("vecAddonMetadata");
+    if( GetAddonList() == 0 )
+    {
+        LogMessage("server doesn't have workshop map, please add it.");
+        return;
+    }
+
+    g_Address_vecAddonMetadata  = hGameData.GetMemSig("vecAddonMetadata");
     if( g_Address_vecAddonMetadata == Address_Null )
         SetFailState("Failed to load \"vecAddonMetadata\" address");
 }

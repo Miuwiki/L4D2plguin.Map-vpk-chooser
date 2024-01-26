@@ -12,17 +12,41 @@
     {   
         "Addresses"
         {
+            "AddonListCount"
+            {
+                "linux"
+                {
+                    "signature" "show_addon_metadata"
+                    "read" "9"
+                }
+                "windows"
+                {
+                    "signature"  "show_addon_metadata"
+                    "read" "2"
+                }
+            }
             "vecAddonMetadata"
             {
                 "linux"
                 {
                     "signature" "vecAddonMetadata"
                 }
+                "windows"
+                {
+                    "signature"  "show_addon_metadata"
+                    "read" "49"
+                }
             }
         }
         
         "Signatures"
         {
+            "show_addon_metadata"
+            {
+                "library"	"engine"
+	            "windows"   "\x83\x3D\x2A\x2A\x2A\x2A\x00\x53\x56\x8B\x35"
+                "linux"     "@_ZL19show_addon_metadataRK8CCommand"
+            }
             "vecAddonMetadata"
             {
                 "library"	"engine"

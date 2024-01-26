@@ -48,6 +48,7 @@ static char g_official_vpkname[][128] =
  * }
  */
 Address g_Address_vecAddonMetadata;
+Address g_Address_vecAddonListCount;
 
 TopMenuObject
     g_TopmenuCategroy_mapchoose,
@@ -85,18 +86,21 @@ public void OnPluginStart()
     // RegConsoleCmd("sm_showmap", Cmd_ShowMap);
     // RegAdminCmd("sm_maplist", Cmd_MapList, ADMFLAG_ROOT);
 
-    if( !LibraryExists("adminmenu") )
+    TopMenu adminmenu = GetAdminTopMenu();
+
+    if( !LibraryExists("adminmenu") && adminmenu == null )
+    {
+        LogError("admin menu couldn't create, check adminmenu.smx state");
         return;
-    
-    OnAdminMenuCreated(INVALID_HANDLE);
+    }
+        
+    OnAdminMenuCreated(adminmenu);
 }
-
-
 
 public void OnAdminMenuCreated(Handle pass)
 {
     TopMenu adminmenu = GetAdminTopMenu();
-    if( adminmenu == null )
+    if( adminmenu == INVALID_HANDLE )
     {
         LogError("Failed to create object in admin menu.");
         return;
@@ -256,6 +260,9 @@ void LoadServerMap()
 
     while( missionlist.GetNext( path, sizeof(path)) )
     {
+        if( strlen(path) < 4 )
+            continue;
+
         if( strcmp(path[strlen(path) - 4], ".txt") != 0 ) // just confirm the last 4 byte is ".txt" or not.
             continue;
 
@@ -285,10 +292,10 @@ void LoadServerMap()
             kv.GetString("Map", path, sizeof(path));
             map.chapter.PushString(path);
 
-            // if( map.type )
-            //     LogMessage("Get official map: %s, file: %s, chapter: %s", map.missionname, map.missionfile, path);
-            // else
-            //     LogMessage("Get workshop map: %s, file: %s, chapter: %s", map.missionname, map.missionfile, path);
+            if( map.type == OFFICIAL_MAP )
+                LogMessage("Get official map: %s, file: %s, chapter: %s", map.missionname, map.missionfile, path);
+            else if( map.type == WORKSHOP_MAP )
+                LogMessage("Get workshop map: %s, file: %s, chapter: %s", map.missionname, map.missionfile, path);
         }
         while( kv.GotoNextKey() );
 
@@ -356,19 +363,15 @@ void SortOfficialMap()
 void GetWorkshopMapVpkName()
 {
     // load workshop map vpkname.
-    int addonlist = GetAddonList();
-    if( addonlist == 0 )
-        return;
+    int addoncount = LoadFromAddress(g_Address_vecAddonListCount, NumberType_Int32);
 
     Address data = LoadFromAddress(g_Address_vecAddonMetadata, NumberType_Int32);
+
     int offset, type;
     char missionfile[128], path[128];
-    for(int i = 0; i < addonlist; i++)
+    for(int i = 0; i < addoncount; i++)
     {
         type = LoadFromAddress(data + view_as<Address>(offset) + view_as<Address>(256), NumberType_Int8);
-
-        if( type < 0 || type > 2 )  // addonlist by read addonlist.txt count is not correct since there is mutli pack vpk map.  
-            break;                  // to reduce the situtation of over read, check type before it is over.
 
         // type != 1, which is not mission
         if( type != 1 )
@@ -376,9 +379,9 @@ void GetWorkshopMapVpkName()
             offset += 264; // 128 + 128 + 8
             continue;
         }
-        
-        LoadStringFromAddress(data + view_as<Address>(offset) + view_as<Address>(128), missionfile, sizeof(missionfile));
+
         LoadStringFromAddress(data + view_as<Address>(offset), path, sizeof(path));
+        LoadStringFromAddress(data + view_as<Address>(offset) + view_as<Address>(128), missionfile, sizeof(missionfile));
 
         GetVpknameFromPath(path, sizeof(path));
         workshopmap_vpkname.SetString(missionfile, path);
@@ -422,7 +425,7 @@ void SetMissionVpkName()
                 workshopmap_vpkname.GetString(map.missionfile, map.vpkname, sizeof(map.vpkname));
         }
 
-        LogMessage("total servermap %d set vpkname of map %s, vpkname %s",servermap.Length, map.missionname, map.vpkname);
+        // LogMessage("total servermap %d set vpkname of map %s, vpkname %s",servermap.Length, map.missionname, map.vpkname);
         servermap.SetArray(i, map);
     }
 }
@@ -445,9 +448,15 @@ void LoadGameData()
         return;
     }
 
-    g_Address_vecAddonMetadata  = hGameData.GetMemSig("vecAddonMetadata");
+    g_Address_vecAddonListCount  = hGameData.GetAddress("AddonListCount");
+    if( g_Address_vecAddonListCount == Address_Null )
+        SetFailState("Failed to load \"AddonListCount\" address");
+    
+    g_Address_vecAddonMetadata  = hGameData.GetAddress("vecAddonMetadata");
     if( g_Address_vecAddonMetadata == Address_Null )
         SetFailState("Failed to load \"vecAddonMetadata\" address");
+    
+    delete hGameData;
 }
 
 stock int LoadStringFromAddress(Address addr, char[] buffer, int maxlen, bool &bIsNullPointer = false)

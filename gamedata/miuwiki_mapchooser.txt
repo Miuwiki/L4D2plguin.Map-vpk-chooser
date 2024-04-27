@@ -1,0 +1,57 @@
+/**
+ * 加上"read" "0" 将获取指针指向的 内存存储的值. 等于提前执行了LoadFromAddress()
+ * 不加, 将获得指针本身.
+ * 如果read的不为0, 则在指针加上该值后, 获取该指针指向的 内存存储的值.
+ *
+ * "offset" "1" 将获得指针本身 + 1后的大小.
+*/
+
+"Games"
+{
+    "left4dead2"
+    {   
+        "Addresses"
+        {
+            "AddonListCount"
+            {
+                "linux"
+                {
+                    "signature" "show_addon_metadata"
+                    "read" "9"
+                }
+                "windows"
+                {
+                    "signature"  "show_addon_metadata"
+                    "read" "2"
+                }
+            }
+            "vecAddonMetadata"
+            {
+                "linux"
+                {
+                    "signature" "vecAddonMetadata"
+                }
+                "windows"
+                {
+                    "signature"  "show_addon_metadata"
+                    "read" "49"
+                }
+            }
+        }
+        
+        "Signatures"
+        {
+            "show_addon_metadata"
+            {
+                "library"	"engine"
+	            "windows"   "\x83\x3D\x2A\x2A\x2A\x2A\x00\x53\x56\x8B\x35"
+                "linux"     "@_ZL19show_addon_metadataRK8CCommand"
+            }
+            "vecAddonMetadata"
+            {
+                "library"	"engine"
+                "linux"     "@_ZL18s_vecAddonMetadata"
+            }
+        }
+    }
+}

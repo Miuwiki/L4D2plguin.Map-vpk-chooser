@@ -12,7 +12,7 @@
 #include <sdktools>
 #include <sourcemod>
 
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.1.1"
 
 public Plugin myinfo =
 {
@@ -24,9 +24,14 @@ public Plugin myinfo =
 }
 
 
+#define DEBUG 1
+
+
 #define OFFICIAL_MAP 0
 #define WORKSHOP_MAP 1
 #define GAMEDATA "miuwiki_mapchooser"
+
+
 
 static char g_official_vpkname[][128] = {
     "死亡中心",
@@ -108,6 +113,8 @@ public void OnPluginStart()
     {
         OnAdminMenuCreated(adminmenu);
     }
+
+    RegAdminCmd("sm_smap", Cmd_ShowSpecifMap, (ADMFLAG_ROOT|ADMFLAG_CHANGEMAP), "显示特定名称拥有的VPK地图");
 }
 
 public void OnAdminMenuCreated(Handle topmenu)
@@ -174,6 +181,51 @@ void TopMenuHandler_Item(TopMenu topmenu, TopMenuAction action, TopMenuObject ob
     }
 }
 
+Action Cmd_ShowSpecifMap(int client, int args)
+{
+    if( args != 1 )
+    {
+        ReplyToCommand(client, "#usage: !smap <searchname>");
+        return Plugin_Handled;
+    }
+
+    if( g_workshopmap.Length == 0 )
+    {
+        ReplyToCommand(client, "#没有三方图可供搜索");
+        return Plugin_Handled;
+    }
+
+    char name[128], info[128];
+    GetCmdArg(1, name, sizeof(name));
+
+    Menu menu = new Menu(MenuHandler_ShowMapList);
+    
+    MapInfo map;
+    for(int i = 0; i < g_workshopmap.Length; i++)
+    {
+        g_workshopmap.GetArray(i, map, sizeof(map));
+        
+        if( StrContains(map.vpkname, name, false) == -1 )
+            continue;
+
+        FormatEx(info, sizeof(info), "%d-%d", workshopmap_vpkname, i);
+        if( strcmp(map.vpkname, "") == 0 )
+            menu.AddItem(info, map.missionname);
+        else
+            menu.AddItem(info, map.vpkname);
+    }
+
+    if( menu.ItemCount == 0 )
+    {
+        ReplyToCommand(client, "#服务器没有匹配字符为'%s'的三方图'", name);
+        delete menu;
+        return Plugin_Handled;
+    }
+
+    menu.SetTitle("★符合名称的三方图\n——————————————");
+    menu.Display(client, 20);
+    return Plugin_Handled;
+}
 
 void ShowMapList(int client, int mode)
 {
@@ -292,7 +344,9 @@ void LoadServerMap()
 
         MapInfo map;
         FormatEx(map.missionfile, sizeof(map.missionfile), "%s", path);
-
+        #if DEBUG
+            LogMessage("loading map %s", path);
+        #endif
         Format(path, sizeof(path), "missions/%s", path);
         KeyValues kv = new KeyValues("");
         kv.ImportFromFile(path);
@@ -316,10 +370,12 @@ void LoadServerMap()
             kv.GetString("Map", path, sizeof(path));
             map.chapter.PushString(path);
 
-            if(map.type == OFFICIAL_MAP)
-                LogMessage("Get official map: %s, file: %s, chapter: %s", map.missionname, map.missionfile, path);
-            else if(map.type == WORKSHOP_MAP)
-                LogMessage("Get workshop map: %s, file: %s, chapter: %s", map.missionname, map.missionfile, path);
+            #if DEBUG
+                if(map.type == OFFICIAL_MAP)
+                    LogMessage("Get official map: %s, file: %s, chapter: %s", map.missionname, map.missionfile, path);
+                else if(map.type == WORKSHOP_MAP)
+                    LogMessage("Get workshop map: %s, file: %s, chapter: %s", map.missionname, map.missionfile, path);
+            #endif
         } 
         while(kv.GotoNextKey());
 
@@ -335,7 +391,9 @@ void LoadServerMap()
 
     delete missionlist;
 
-    // LogMessage("Finish Map Load. Get %d official map, %d workshop map", servermap.official_map.Length, servermap.workshop_map.Length);
+    #if DEBUG
+      LogMessage("Finish Map Load. Get %d official map, %d workshop map", g_officialmap.Length, g_workshopmap.Length);
+    #endif
 }
 
 void LoadWorkShopMapVpkName()
@@ -365,10 +423,13 @@ void LoadWorkShopMapVpkName()
         LoadStringFromAddress(data + view_as<Address>(offset) + view_as<Address>(128), missionfile, sizeof(missionfile));
 
         GetVpknameFromPath(path, sizeof(path));
-        workshopmap_vpkname.SetString(missionfile, path);
 
-        LogMessage("store mission vpk path %s to %s", path, missionfile);
+        workshopmap_vpkname.SetString(missionfile, path);
         offset += 264;
+
+        #if DEBUG
+            LogMessage("Store VPK name %s to missision %s", path, missionfile);
+        #endif
     }
 }
 
@@ -376,7 +437,11 @@ void GetVpknameFromPath(char[] buffer, int size) // can use to get the byte star
 {
     int len = strlen(buffer);
     int index;
-    char split[] = "/";
+
+    char split[] = "\\";
+    if( strncmp(buffer, "/", 1) == 0 )
+        split = "/";
+
     for(int i = 0; i < len; i++)
     {
         // PrintToChatAll("comparing %s", buffer[len - i]);
@@ -400,7 +465,7 @@ bool HasAddonMetadata()
 {
     KeyValues kv = new KeyValues("");
     
-    if( !kv.ImportFromFile("addonlist.txt") || !kv.GotoFirstSubKey(false))
+    if( !kv.ImportFromFile("addonlist.txt") || !kv.GotoFirstSubKey(false) )
     {
         delete kv;
         return false;
@@ -507,4 +572,38 @@ any Native_Miuwiki_GetMapList(Handle plugin, int arg_num)
     ArrayList temp = mode == OFFICIAL_MAP ? g_officialmap.Clone() : g_workshopmap.Clone();
     
     return temp;
+}
+
+int GetServerOs()
+{
+    char buffer[512], temp[7][256];
+
+    ServerCommandEx(buffer, sizeof(buffer), "status");
+    ExplodeString(buffer, ": ", temp, sizeof(temp), sizeof(temp[]));
+
+    // FormatEx(buffer, strlen(temp[1]) - 7, "%s", temp[1]); // strlen("version") = 7, buffer string now is "servername\nversion", so ignore the last 7 char to get servername.
+    // Format(buffer, sizeof(buffer), "服务器: %s", buffer);
+    // strcopy(info[0], size, buffer);
+
+    // FormatEx(buffer, strlen(temp[2]) - 7, "%s", temp[2]); // strlen("udp/ip ") = 7, buffer string now is "2.2.4.3 9477 insecure\nudp/ip ", so ignore the last 7 char to get "2.2.4.3 9477 insecure".
+    // Format(buffer, sizeof(buffer), "版本: %s", buffer);
+    // strcopy(info[1], size, buffer);
+
+    // FormatEx(buffer, strlen(temp[3]) - 7, "%s", temp[3]); // strlen("os     ") = 7
+    // Format(buffer, sizeof(buffer), "ip信息: %s", buffer);
+    // strcopy(info[2], size, buffer);
+
+    FormatEx(buffer, strlen(temp[4]) - 7, "%s", temp[4]); // strlen("map     ") = 7
+    if( StrContains(buffer, "windows", false) != -1 )
+        return 1;
+    else
+        return 0;
+
+	// FormatEx(buffer, strlen(temp[5]) - 7, "%s", temp[5]); // strlen("players ") = 7
+	// Format(buffer, sizeof(buffer), "当前地图: %s", buffer);
+	// strcopy(info[4], size, buffer);
+
+	// ExplodeString(temp[6], "#", playerstate, sizeof(playerstate), sizeof(playerstate[]));
+	// FormatEx(buffer, sizeof(buffer), "玩家信息: %s", playerstate[0]); 
+	// strcopy(info[5], size, buffer);
 }

@@ -7,7 +7,9 @@
 
 #define PLUGIN_VERSION "1.0.0"
 
-ArrayList g_maplist;
+ArrayList
+    g_ArrayList_OfficialMap,
+    g_ArrayList_WorkshopMap;
 
 ConVar
     cvar_l4d2_votetime,
@@ -15,6 +17,7 @@ ConVar
     
 
 char 
+    g_votefile[128],
     g_votemap[128];
 
 bool 
@@ -43,7 +46,9 @@ public void OnAllPluginsLoaded()
 {
     if( !LibraryExists("maplist") )
         SetFailState("Couldn't find request plugin \"miuwiki_mapchooser.smx\", check it is running or not.");
-
+    
+    g_ArrayList_OfficialMap = M_GetMapList(OFFICIAL_MAP);
+    g_ArrayList_WorkshopMap = M_GetMapList(WORKSHOP_MAP);
 }
 
 public void OnPluginStart()
@@ -119,18 +124,67 @@ Action CMD_VoteMap(int client, int args)
         return Plugin_Handled;
     }
 
-    Menu menu = new Menu(MenuHandler_ShowMap);
-    menu.SetTitle("★投票更换地图\n——————————————");
     int flag = GetUserFlagBits(client);
 
-    if( flag & (ADMFLAG_CHANGEMAP|ADMFLAG_ROOT) )
-        menu.AddItem("workshop" ,"更换三方图");
-    else
-        menu.AddItem("non", "更换三方图(您非管理员无法使用)", ITEMDRAW_DISABLED);
-    
-    menu.AddItem("official", "更换官方图");
+    if( args == 1 )
+    {
+        if( !(flag & (ADMFLAG_CHANGEMAP|ADMFLAG_ROOT)) )
+        {
+            ReplyToCommand(client, "#您非管理员, 无法使用快速筛查更换三方图, 请使用!mapv投票更换官图");
+            return Plugin_Handled;
+        }
 
-    menu.Display(client, 20);
+        Menu menu = new Menu(MenuHandler_ShowChapterList);
+        menu.SetTitle("★符合名称的三方图\n——————————————");
+
+        MapInfo map;
+        char name[128], info[128];
+        GetCmdArg(1, name, sizeof(name));
+
+        // ArrayList maplist = M_GetMapList(WORKSHOP_MAP);
+        if( g_ArrayList_WorkshopMap.Length == 0 )
+        {
+            ReplyToCommand(client, "#没有三方图可供搜索.");
+            delete menu;
+            return Plugin_Handled;
+        }
+
+        for(int i = 0; i < g_ArrayList_WorkshopMap.Length; i++)
+        {
+            g_ArrayList_WorkshopMap.GetArray(i, map, sizeof(map));
+
+            if( StrContains(map.vpkname, name, false) == -1 )
+                continue;
+
+            FormatEx(info, sizeof(info), "%d-%d", WORKSHOP_MAP, i);
+            if( strcmp(map.vpkname, "") == 0 )
+                menu.AddItem(info, map.missionname);
+            else
+                menu.AddItem(info, map.vpkname);
+        }
+
+        if( menu.ItemCount == 0 )
+        {
+            ReplyToCommand(client, "#没有匹配字符的三方图.");
+            delete menu;
+            return Plugin_Handled;
+        }
+
+        menu.Display(client, 20);
+    }
+    else
+    {
+        Menu menu = new Menu(MenuHandler_ShowMap);
+        menu.SetTitle("★投票更换地图\n——————————————");
+        if( flag & (ADMFLAG_CHANGEMAP|ADMFLAG_ROOT) )
+            menu.AddItem("workshop" ,"更换三方图");
+        else
+            menu.AddItem("non", "更换三方图(您非管理员无法使用)", ITEMDRAW_DISABLED);
+        
+        menu.AddItem("official", "更换官方图");
+        menu.Display(client, 20);
+    }
+    
     return Plugin_Handled;
     // ArrayList maplist = M_GetMapList(OFFICIAL_MAP);
 }
@@ -158,7 +212,7 @@ int MenuHandler_ShowMap(Menu menu, MenuAction action, int client, int index)
 void ShowMapList(int client, int mode)
 {
     Menu menu = new Menu(MenuHandler_ShowChapterList);
-    g_maplist = mode == OFFICIAL_MAP ? M_GetMapList(OFFICIAL_MAP) : M_GetMapList(WORKSHOP_MAP);
+    ArrayList maplist = mode == OFFICIAL_MAP ? g_ArrayList_OfficialMap : g_ArrayList_WorkshopMap;
     
     if(mode == OFFICIAL_MAP)
         menu.SetTitle("★官方图\n——————————————");
@@ -166,12 +220,11 @@ void ShowMapList(int client, int mode)
         menu.SetTitle("★三方图\n——————————————");
 
     MapInfo map; char info[8];
-    for(int i = 0; i < g_maplist.Length; i++)
+    for(int i = 0; i < maplist.Length; i++)
     {
+        maplist.GetArray(i, map);
         
-        g_maplist.GetArray(i, map);
-        
-        FormatEx(info, sizeof(info), "%d", i);
+        FormatEx(info, sizeof(info), "%d-%d", mode, i);
         if( strcmp(map.vpkname, "") == 0 )
             menu.AddItem(info, map.missionname);
         else
@@ -186,9 +239,10 @@ int MenuHandler_ShowChapterList(Menu menu, MenuAction action, int client, int in
 {
     if(action == MenuAction_Select)
     {
-        char info[128];
+        char info[128], data[2][64];
         menu.GetItem(index, info, sizeof(info));
-        ShowChapterList(client, StringToInt(info));
+        ExplodeString(info, "-", data, sizeof(data), sizeof(data[]));
+        ShowChapterList(client, StringToInt(data[0]), StringToInt(data[1]));
     }
     else if(action == MenuAction_End)
     {
@@ -197,11 +251,12 @@ int MenuHandler_ShowChapterList(Menu menu, MenuAction action, int client, int in
 
     return 0;
 }
-void ShowChapterList(int client, int index)
+void ShowChapterList(int client, int mode, int index)
 {
     Menu menu = new Menu(MenuHandler_VoteMap);
     MapInfo map;
-    g_maplist.GetArray(index, map);
+    ArrayList maplist = mode == OFFICIAL_MAP ? g_ArrayList_OfficialMap : g_ArrayList_WorkshopMap;
+    maplist.GetArray(index, map);
 
     char info[128];
     if(IsNullString(map.vpkname))
@@ -214,7 +269,7 @@ void ShowChapterList(int client, int index)
     for(int i = 0; i < map.chapter.Length; i++)
     {
         map.chapter.GetString(i, info, sizeof(info));
-        menu.AddItem(info, info);
+        menu.AddItem(map.vpkname, info);
     }
 
     menu.Display(client, 20);
@@ -232,7 +287,7 @@ int MenuHandler_VoteMap(Menu menu, MenuAction action, int client, int index)
 
         g_isvoting = true;
         g_startvotetime = GetGameTime();
-        menu.GetItem(index, g_votemap, sizeof(g_votemap));
+        menu.GetItem(index, g_votefile, sizeof(g_votefile), _, g_votemap, sizeof(g_votemap));
         PrintToChatAll("\x04[服务器]\x05正在举行投票换图, 聊天框输入\x040反对\x05, 1赞成, \x012弃权\x05.");
     }
     else if(action == MenuAction_End)
@@ -246,6 +301,7 @@ int MenuHandler_VoteMap(Menu menu, MenuAction action, int client, int index)
 public void OnGameFrame()
 {
     float time = GetGameTime();
+    float remain = g_startvotetime + g_votetime - time;
     // check vote result.
     if( g_startvotetime != 0 && time - g_startvotetime >= g_votetime )
     {
@@ -278,27 +334,27 @@ public void OnGameFrame()
         
         if( g_clientvote[client] == -1 )
         {
-            FormatEx(info, sizeof(info), "★正在投票换图到:%s\n \
-                                        赞成: %d \\\\ 反对: %d \\\\ 弃权: %d\n \
-                                        您还未投票!", g_votemap, data[1], data[0], data[2]);
+            FormatEx(info, sizeof(info), "★正在投票换图到: %s => %s\n \
+                                        赞成: %d | 反对: %d | 弃权: %d\n \
+                                        您还未投票! 剩余时间: %d", g_votefile, g_votemap, data[1], data[0], data[2], RoundToFloor(remain));
         }
         else if( g_clientvote[client] == 0 )
         {
-            FormatEx(info, sizeof(info), "★正在投票换图到:%s\n \
-                                        赞成:%d \\\\ 反对:%d \\\\ 弃权:%d\n \
-                                        您已投反对票!", g_votemap, data[1], data[0], data[2]);
+            FormatEx(info, sizeof(info), "★正在投票换图到: %s => %s\n \
+                                        赞成:%d | 反对:%d | 弃权:%d\n \
+                                        您已投反对票! 剩余时间: %d", g_votefile, g_votemap, data[1], data[0], data[2], RoundToFloor(remain));
         }
         else if( g_clientvote[client] == 1 )
         {
-            FormatEx(info, sizeof(info), "★正在投票换图到:%s\n \
-                                        赞成:%d \\\\ 反对:%d \\\\ 弃权:%d\n \
-                                        您已投赞成票!", g_votemap, data[1], data[0], data[2]);
+            FormatEx(info, sizeof(info), "★正在投票换图到: %s => %s\n \
+                                        赞成:%d | 反对:%d | 弃权:%d\n \
+                                        您已投赞成票! 剩余时间: %d", g_votefile, g_votemap, data[1], data[0], data[2], RoundToFloor(remain));
         }
         else if( g_clientvote[client] == 2 )
         {
-            FormatEx(info, sizeof(info), "★正在投票换图到:%s\n \
-                                        赞成:%d \\\\ 反对:%d \\\\ 弃权:%d\n \
-                                        您已投弃权票!", g_votemap, data[1], data[0], data[2]);
+            FormatEx(info, sizeof(info), "★正在投票换图到: %s => %s\n \
+                                        赞成:%d | 反对:%d | 弃权:%d\n \
+                                        您已投弃权票! 剩余时间: %d", g_votefile, g_votemap, data[1], data[0], data[2], RoundToFloor(remain));
         }
 
         PrintHintText(client, "%s", info);
@@ -338,8 +394,8 @@ void CheckResult()
     }
 
     g_isvoting = false;
-    g_votemap = "";
+    g_votefile = "";
+    g_votemap  = "";
     g_startvotetime = 0.0;
     g_lastshowtime = 0.0;
-    delete g_maplist;
 }

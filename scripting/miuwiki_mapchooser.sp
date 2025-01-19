@@ -208,7 +208,7 @@ Action Cmd_ShowSpecifMap(int client, int args)
         if( StrContains(map.vpkname, name, false) == -1 )
             continue;
 
-        FormatEx(info, sizeof(info), "%d-%d", workshopmap_vpkname, i);
+        FormatEx(info, sizeof(info), "%d-%d", WORKSHOP_MAP, i);
         if( strcmp(map.vpkname, "") == 0 )
             menu.AddItem(info, map.missionname);
         else
